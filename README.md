@@ -212,7 +212,7 @@ _Example - Rollback ChangeLog_: makes use of the `rollbackScriptName` annotation
   }
 ```
 _Example - mongobee-test-resource-rollback-changeset1.json_: mongodb commands to rollback `foo`
-```json
+```
 {
   delete: "contact",
   deletes: [
@@ -227,7 +227,7 @@ _Example - mongobee-test-resource-rollback-changeset1.json_: mongodb commands to
 ```
 
 _Example - mongobee-test-resource-rollback-changeset2.json_: mongodb commands to rollback `bar` and `baz`
-```json
+```
 {
   delete: "contact",
   deletes: [
