@@ -1,19 +1,25 @@
 package com.github.mongobee.core.dao;
 
-import com.github.mongobee.core.Mongobee;
 import com.github.mongobee.core.changeset.ChangeEntry;
 import com.github.mongobee.core.exception.MongobeeConfigurationException;
 import com.github.mongobee.core.exception.MongobeeConnectionException;
-import com.github.mongobee.core.utils.StringUtils;
+import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static com.github.mongobee.core.changeset.ChangeEntry.*;
 import static com.github.mongobee.core.utils.StringUtils.hasText;
 
 /**
@@ -89,18 +95,35 @@ public class ChangeEntryDao {
     lockDao.releaseLock(getMongoDatabase());
   }
 
-  public boolean isProccessLockHeld() throws MongobeeConnectionException {
+  public boolean isProcessLockHeld() throws MongobeeConnectionException {
     verifyDbConnection();
     return lockDao.isLockHeld(getMongoDatabase());
   }
 
-  public boolean isNewChange(ChangeEntry changeEntry) throws MongobeeConnectionException {
+  @SuppressWarnings("unchecked")
+  public Map<String, List<ChangeEntry>> getAllChangeEntries() throws MongobeeConnectionException {
     verifyDbConnection();
 
-    MongoCollection<Document> mongobeeChangeLog = getMongoDatabase().getCollection(changelogCollectionName);
-    Document entry = mongobeeChangeLog.find(changeEntry.buildSearchQueryDBObject()).first();
+    FindIterable<Document> mongobeeChangeLog = getMongoDatabase().getCollection(changelogCollectionName).find().sort(new BasicDBObject(KEY_TIMESTAMP, -1));
 
-    return entry == null;
+    if (mongobeeChangeLog == null) {
+      return null;
+    }
+
+    Map<String, List<ChangeEntry>> changeEntryMap = new HashMap<>();
+    for (Document d : mongobeeChangeLog) {
+      ChangeEntry changeEntry = new ChangeEntry(d.getString(KEY_CHANGEID), d.getString(KEY_AUTHOR), d.getDate(KEY_TIMESTAMP), d.getString(KEY_CHANGELOGCLASS), d.getString(KEY_CHANGESETMETHOD), d.get(KEY_ROLLBACK_COMMANDS, List.class));
+      logger.debug("Found change entry in database [{}]", changeEntry.toString());
+      if (changeEntryMap.containsKey(changeEntry.getChangeLogClass())) {
+        changeEntryMap.get(changeEntry.getChangeLogClass()).add(changeEntry);
+      } else {
+        List<ChangeEntry> changeEntries = new ArrayList<>();
+        changeEntries.add(changeEntry);
+        changeEntryMap.put(changeEntry.getChangeLogClass(), changeEntries);
+      }
+    }
+
+    return changeEntryMap;
   }
 
   public void save(ChangeEntry changeEntry) throws MongobeeConnectionException {
@@ -108,7 +131,17 @@ public class ChangeEntryDao {
 
     MongoCollection<Document> mongobeeLog = getMongoDatabase().getCollection(changelogCollectionName);
 
+    logger.debug("Saving ChangeEntry to database [{}]", changeEntry.buildFullDBObject().toJson());
+
     mongobeeLog.insertOne(changeEntry.buildFullDBObject());
+  }
+
+  public void delete(ChangeEntry changeEntry) throws MongobeeConnectionException {
+    verifyDbConnection();
+
+    MongoCollection<Document> mongobeeLog = getMongoDatabase().getCollection(changelogCollectionName);
+
+    mongobeeLog.deleteOne(changeEntry.buildFullDBObject());
   }
 
   private void verifyDbConnection() throws MongobeeConnectionException {
@@ -128,7 +161,6 @@ public class ChangeEntryDao {
       indexDao.createRequiredUniqueIndex(collection);
       logger.debug("Index in collection " + changelogCollectionName + " was recreated");
     }
-
   }
 
   public void close() {

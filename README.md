@@ -120,6 +120,8 @@ Method annotated by @ChangeSet is taken and applied to the database. History of 
 
 `runAlways` - _[optional, default: false]_ changeset will always be executed but only first execution event will be stored in dbchangelog collection
 
+`rollbackScriptName` - _[optional, default: ""]_ the script file name containing mongodb commands to rollback the change set. See section [Rollback](#rollback)
+
 ##### Defining ChangeSet methods
 Method annotated by `@ChangeSet` can have one of the following definition:
 
@@ -170,6 +172,104 @@ public void someChange5(MongoTemplate mongoTemplate, Environment environment) {
   // type: org.springframework.core.env.Environment
   // Spring Data integration allows using MongoTemplate and Environment in the ChangeSet
 }
+```
+
+### Rollback
+
+Since the change sets are written in Java classes, a rollback is not possible due to the fact that the previous versions can't be aware of what was done in future versions.
+Therefore the rollback is supported by providing MongoDB script files.
+The script content is saved in the mongobee changelog collection, together with the change set method information.
+An annotation field `rollbackScriptName` was added to `@ChangeSet` to provide the script name, which needs to be available in the classpath.
+These scripts are a set of MongoDB Commands - see [MongoDB Manual - Command](https://docs.mongodb.com/manual/reference/command/)
+
+The rollback feature is enabled by default and can be controlled by setting the following:
+```java
+setExecuteRollback(boolean executeRollback)
+```
+
+The rollback will be executed in the following cases:
+* When a change change log in the DB is found, but not anymore in the corresponding class and a `rollbackScriptName` was set on the not existing change log entries
+* When a change change log in the DB is found, but the corresponding class does not exist at all the whole change log will be rolled back
+
+_Example - Rollback ChangeLog_: makes use of the `rollbackScriptName` annotation parameter
+```java
+  @ChangeSet(author = "testuser", id = "test1", order = "01", rollbackScriptName = "mongobee-test-resource-rollback-changeset1.json")
+  public void testChangeSet(MongoDatabase mongoDatabase) {
+    Document contact = new Document();
+    contact.put("name", "foo");
+    mongoDatabase.getCollection("contact").insertOne(contact);
+  }
+
+  @ChangeSet(author = "testuser", id = "test2", order = "02", rollbackScriptName = "mongobee-test-resource-rollback-changeset2.json")
+  public void testChangeSet2(MongoDatabase mongoDatabase) {
+    Document contact = new Document();
+    contact.put("name", "bar");
+    mongoDatabase.getCollection("contact").insertOne(contact);
+
+    contact = new Document();
+    contact.put("name", "baz");
+    mongoDatabase.getCollection("contact").insertOne(contact);
+  }
+```
+_Example - mongobee-test-resource-rollback-changeset1.json_: mongodb commands to rollback `foo`
+```json
+{
+  delete: "contact",
+  deletes: [
+    {
+      q: {
+        name: "foo"
+      },
+      limit: 1
+    }
+  ]
+}
+```
+
+_Example - mongobee-test-resource-rollback-changeset2.json_: mongodb commands to rollback `bar` and `baz`
+```json
+{
+  delete: "contact",
+  deletes: [
+    {
+      q: {
+        name: "bar"
+      },
+      limit: 1
+    }
+  ]
+}
+
+{
+  delete: "contact",
+  deletes: [
+    {
+      q: {
+        name: "baz"
+      },
+      limit: 1
+    }
+  ]
+}
+```
+
+Multiple mongodb commands **must be** separated by a new line!
+
+### Controlling Lock Acquire
+
+It is possible to control the lock acquire behaviour.
+By default Mongobee will skip the processing if the lock can't be acquired without throwing an Exception or blocking while another Mongobee process executes.
+
+This can be changed to throw a `MongobeeLockAquireException` by setting the following:
+```java
+setFailOnLockAcquire(boolean failOnLockAcquire)
+```
+
+A lock acquire timeout (in milliseconds) can be set to block the process and wait for the lock to be released.
+If the lockAcquireTimeout is set to `-1` it will block forever.
+The default is `null` (not blocking/waiting):
+```java
+setLockAcquireTimeout(Long lockAcquireTimeout)
 ```
 
 ### Using Spring profiles

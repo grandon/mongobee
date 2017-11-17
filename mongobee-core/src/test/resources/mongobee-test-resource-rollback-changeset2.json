@@ -1,0 +1,23 @@
+{
+  delete: "contact",
+  deletes: [
+    {
+      q: {
+        name: "bar"
+      },
+      limit: 1
+    }
+  ]
+}
+
+{
+  delete: "contact",
+  deletes: [
+    {
+      q: {
+        name: "baz"
+      },
+      limit: 1
+    }
+  ]
+}

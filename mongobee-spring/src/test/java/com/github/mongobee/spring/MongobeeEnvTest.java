@@ -70,7 +70,6 @@ public class MongobeeEnvTest {
     // given
     runner.setSpringEnvironment(new EnvironmentMock());
     runner.setChangeLogsScanPackage(EnvironmentDependentTestResource.class.getPackage().getName());
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();
@@ -89,7 +88,6 @@ public class MongobeeEnvTest {
     // given
     runner.setSpringEnvironment(null);
     runner.setChangeLogsScanPackage(EnvironmentDependentTestResource.class.getPackage().getName());
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();

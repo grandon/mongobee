@@ -2,11 +2,9 @@ package com.github.mongobee.core;
 
 import com.github.mongobee.core.changeset.ChangeEntry;
 import com.github.mongobee.core.dao.ChangeEntryDao;
-import com.github.mongobee.core.exception.MongobeeChangeSetException;
-import com.github.mongobee.core.exception.MongobeeConfigurationException;
-import com.github.mongobee.core.exception.MongobeeConnectionException;
-import com.github.mongobee.core.exception.MongobeeException;
+import com.github.mongobee.core.exception.*;
 import com.github.mongobee.core.utils.ChangeService;
+import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
@@ -17,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 
 import static com.github.mongobee.core.utils.StringUtils.hasText;
 import static com.mongodb.ServerAddress.defaultHost;
@@ -26,7 +25,7 @@ import static com.mongodb.ServerAddress.defaultPort;
  * Mongobee runner
  *
  * @author lstolowski
- * @since 26/07/2014
+ * @since 26 /07/2014
  */
 public class Mongobee {
   private static final Logger logger = LoggerFactory.getLogger(Mongobee.class);
@@ -41,7 +40,9 @@ public class Mongobee {
   private MongoClientURI mongoClientURI;
   private MongoClient mongoClient;
   protected String dbName;
-
+  private boolean executeRollback = true;
+  private boolean failOnLockAcquire = false;
+  private Long lockAcquireTimeout = null;
 
   /**
    * <p>Simple constructor with default configuration of host (localhost) and port (27017). Although
@@ -129,11 +130,35 @@ public class Mongobee {
     }
 
     if (!dao.acquireProcessLock()) {
-      logger.info("Mongobee did not acquire process lock. Exiting.");
-      return;
+      if (lockAcquireTimeout != null && lockAcquireTimeout > 0L) {
+        long lockAcquireStart = System.currentTimeMillis();
+        while (!dao.acquireProcessLock()) {
+          try {
+            if (lockAcquireTimeout < 0L || (System.currentTimeMillis() - lockAcquireStart) < lockAcquireTimeout) {
+              Thread.sleep(1000L);
+            } else {
+              logger.info("Mongobee did not acquire process lock. Timeout [{}] reached. Exiting.", lockAcquireTimeout);
+              if (failOnLockAcquire) {
+                throw new MongobeeLockAquireException(String.format("Lock acquire timeout [%s] reached.", lockAcquireTimeout));
+              } else {
+                return;
+              }
+            }
+          } catch (InterruptedException e) {
+            throw new MongobeeLockAquireException("Lock acquire thread interrupted");
+          }
+        }
+      } else {
+        logger.info("Mongobee did not acquire process lock. Exiting.");
+        if (failOnLockAcquire) {
+          throw new MongobeeLockAquireException("Mongobee did not acquire process lock");
+        } else {
+          return;
+        }
+      }
     }
 
-    logger.info("Mongobee acquired process lock, starting the data migration sequence..");
+    logger.info("Mongobee acquired process lock, starting the data migration sequence...");
 
     try {
       executeMigration();
@@ -142,50 +167,131 @@ public class Mongobee {
       dao.releaseProcessLock();
     }
 
-    logger.info("Mongobee has finished his job.");
+    logger.info("Mongobee finished.");
   }
 
-  private void executeMigration() throws MongobeeConnectionException, MongobeeException {
+  private void executeMigration() throws MongobeeException {
 
     ChangeService service = newChangeService();
+    List<Class<?>> classChangeLogs = service.fetchChangeLogs();
+    Map<String, List<ChangeEntry>> changeEntryMap = dao.getAllChangeEntries();
 
-    for (Class<?> changelogClass : service.fetchChangeLogs()) {
-
-      Object changelogInstance = null;
-      try {
-        changelogInstance = changelogClass.getConstructor().newInstance();
-        List<Method> changesetMethods = service.fetchChangeSets(changelogInstance.getClass());
-
-        for (Method changesetMethod : changesetMethods) {
-          ChangeEntry changeEntry = service.createChangeEntry(changesetMethod);
-
-          try {
-            if (dao.isNewChange(changeEntry)) {
-              executeChangeSetMethod(changesetMethod, changelogInstance, dao.getDb(), dao.getMongoDatabase());
-              dao.save(changeEntry);
-              logger.info(changeEntry + " applied");
-            } else if (service.isRunAlwaysChangeSet(changesetMethod)) {
-              executeChangeSetMethod(changesetMethod, changelogInstance, dao.getDb(), dao.getMongoDatabase());
-              logger.info(changeEntry + " reapplied");
-            } else {
-              logger.info(changeEntry + " passed over");
+    // This section will check for change logs in the database, which do not exist as a class in the executing version
+    if (executeRollback) {
+      if (changeEntryMap != null && changeEntryMap.size() > 0) {
+        for (String dbChangeLogClass : changeEntryMap.keySet()) {
+          boolean foundDbChangeLog = false;
+          for (Class<?> classChangeLogClass : classChangeLogs) {
+            logger.debug("Checking database class [{}] against class in classpath [{}]", dbChangeLogClass, classChangeLogClass.getName());
+            if (dbChangeLogClass.equals(classChangeLogClass.getName())) {
+              foundDbChangeLog = true;
+              break;
             }
-          } catch (MongobeeChangeSetException e) {
-            logger.error(e.getMessage());
+          }
+
+          if (!foundDbChangeLog) {
+            logger.info("Changelog class [{}] does not exist in this version. Performing rollback actions if they exist.", dbChangeLogClass);
+
+            for (ChangeEntry databaseChangeEntry : changeEntryMap.get(dbChangeLogClass)) {
+              if (databaseChangeEntry.getRollbackCommands() != null && !databaseChangeEntry.getRollbackCommands().isEmpty()) {
+                for (String rollbackCommand : databaseChangeEntry.getRollbackCommands()) {
+                  logger.info("Executing rollback command [{}]", rollbackCommand);
+                  dao.getMongoDatabase().runCommand(BasicDBObject.parse(rollbackCommand));
+                }
+              }
+
+              logger.info("Removing change entry [{}] from database", databaseChangeEntry.getChangeLogClass());
+              dao.delete(databaseChangeEntry);
+              logger.info("Rollback completed for [{}]", databaseChangeEntry);
+            }
           }
         }
-      } catch (NoSuchMethodException e) {
-        throw new MongobeeException(e.getMessage(), e);
-      } catch (IllegalAccessException e) {
+      }
+    }
+
+    for (Class<?> changeLogClass : classChangeLogs) {
+      Object changelogInstance = null;
+      try {
+        changelogInstance = changeLogClass.getConstructor().newInstance();
+        List<Method> changeSetMethods = service.fetchChangeSets(changelogInstance.getClass());
+        List<ChangeEntry> databaseChangeEntries = changeEntryMap.get(changeLogClass.getName());
+
+        if (executeRollback && databaseChangeEntries != null && changeSetMethods.size() < databaseChangeEntries.size()) {
+          logger.info("Mongobee will perform rollback actions for class [{}] if they exist.", changeLogClass.getSimpleName());
+
+          for (ChangeEntry databaseChangeEntry : databaseChangeEntries) {
+            boolean foundChangeEntryForRollback = true;
+            ChangeEntry classChangeEntry = null;
+            for (Method changeSetMethod : changeSetMethods) {
+              classChangeEntry = service.createChangeEntry(changeSetMethod);
+              if (classChangeEntry.getChangeId().equals(databaseChangeEntry.getChangeId())) {
+                foundChangeEntryForRollback = false;
+              }
+            }
+
+            if (foundChangeEntryForRollback) {
+              if (databaseChangeEntry.getRollbackCommands() != null && !databaseChangeEntry.getRollbackCommands().isEmpty()) {
+                for (String rollbackCommand : databaseChangeEntry.getRollbackCommands()) {
+                  logger.info("Executing rollback command [{}]", rollbackCommand);
+                  dao.getMongoDatabase().runCommand(BasicDBObject.parse(rollbackCommand));
+                }
+              }
+
+              logger.info("Removing change entry [{}] from database", databaseChangeEntry);
+              dao.delete(databaseChangeEntry);
+              logger.info("Rollback completed for [{}]", databaseChangeEntry);
+            } else {
+              logger.info("Rollback skipped for [{}]", databaseChangeEntry);
+            }
+          }
+        } else {
+          logger.info("Mongobee will perform upgrade actions for class [{}] if they exist.", changeLogClass.getSimpleName());
+
+          for (Method changeSetMethod : changeSetMethods) {
+            ChangeEntry changeEntry = service.createChangeEntry(changeSetMethod);
+
+            try {
+              if (!changeEntryListContainsChangeId(databaseChangeEntries, changeEntry.getChangeId())) {
+                executeChangeSetMethod(changeSetMethod, changelogInstance, dao.getDb(), dao.getMongoDatabase());
+                dao.save(changeEntry);
+                logger.info("Applied [{}]", changeEntry);
+              } else if (service.isRunAlwaysChangeSet(changeSetMethod)) {
+                executeChangeSetMethod(changeSetMethod, changelogInstance, dao.getDb(), dao.getMongoDatabase());
+                logger.info("Reapplied [{}]", changeEntry);
+              } else {
+                logger.info("Skipped [{}]", changeEntry);
+              }
+            } catch (MongobeeChangeSetException e) {
+              logger.error(e.getMessage());
+            }
+          }
+        }
+      } catch (NoSuchMethodException | IllegalAccessException | InstantiationException e) {
         throw new MongobeeException(e.getMessage(), e);
       } catch (InvocationTargetException e) {
         Throwable targetException = e.getTargetException();
         throw new MongobeeException(targetException.getMessage(), e);
-      } catch (InstantiationException e) {
-        throw new MongobeeException(e.getMessage(), e);
       }
 
     }
+  }
+
+  private boolean changeEntryListContainsChangeId(List<ChangeEntry> changeEntries, String changeId)
+  {
+    if (changeEntries == null || changeEntries.size() == 0)
+    {
+      return false;
+    }
+
+    for (ChangeEntry changeEntry : changeEntries)
+    {
+      if (changeEntry.getChangeId().equals(changeId))
+      {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   protected ChangeService newChangeService() {
@@ -228,7 +334,7 @@ public class Mongobee {
    * @throws MongobeeConnectionException exception
    */
   public boolean isExecutionInProgress() throws MongobeeConnectionException {
-    return dao.isProccessLockHeld();
+    return dao.isProcessLockHeld();
   }
 
   /**
@@ -274,7 +380,7 @@ public class Mongobee {
   /**
    * Feature which enables/disables Mongobee runner execution
    *
-   * @param enabled MOngobee will run only if this option is set to true
+   * @param enabled Mongobee will run only if this option is set to true
    * @return Mongobee object for fluent interface
    */
   public Mongobee setEnabled(boolean enabled) {
@@ -313,5 +419,63 @@ public class Mongobee {
    */
   public void close() {
     dao.close();
+  }
+
+  /**
+   * @return true if the rollback scripts in the changeset shall be executed during the migration
+   */
+  public boolean isExecuteRollback() {
+    return executeRollback;
+  }
+
+  /**
+   * Feature which enables/disables Mongobee runner rollback execution
+   *
+   * @param executeRollback will only execute the rollback if this option is set to true
+   * @return Mongobee object for fluent interface
+   */
+  public Mongobee setExecuteRollback(boolean executeRollback) {
+    this.executeRollback = executeRollback;
+    return this;
+  }
+
+  /**
+   * true if Mongobee shall throw a {@link MongobeeLockAquireException} instead of returning when the lock can't be acquired.
+   *
+   * @return the boolean
+   */
+  public boolean isFailOnLockAcquire() {
+    return failOnLockAcquire;
+  }
+
+  /**
+   * Sets fail on lock acquire.
+   *
+   * @param failOnLockAcquire the fail on lock acquire
+   * @return Mongobee object for fluent interface
+   */
+  public Mongobee setFailOnLockAcquire(boolean failOnLockAcquire) {
+    this.failOnLockAcquire = failOnLockAcquire;
+    return this;
+  }
+
+  /**
+   * Gets lock acquire timeout.
+   *
+   * @return the lock acquire timeout
+   */
+  public Long getLockAcquireTimeout() {
+    return lockAcquireTimeout;
+  }
+
+  /**
+   * Sets lock acquire timeout in milliseconds.
+   *
+   * @param lockAcquireTimeout the lock acquire timeout
+   * @return Mongobee object for fluent interface
+   */
+  public Mongobee setLockAcquireTimeout(Long lockAcquireTimeout) {
+    this.lockAcquireTimeout = lockAcquireTimeout;
+    return this;
   }
 }

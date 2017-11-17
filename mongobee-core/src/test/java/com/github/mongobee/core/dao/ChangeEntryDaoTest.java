@@ -183,7 +183,7 @@ public class ChangeEntryDaoTest {
     // when
     when(lockDao.isLockHeld(db)).thenReturn(true);
 
-    boolean lockHeld = dao.isProccessLockHeld();
+    boolean lockHeld = dao.isProcessLockHeld();
 
     // then
     assertTrue(lockHeld);

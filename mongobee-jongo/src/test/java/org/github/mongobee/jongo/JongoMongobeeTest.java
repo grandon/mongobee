@@ -66,7 +66,6 @@ public class JongoMongobeeTest {
   public void shouldExecuteAllChangeSets() throws Exception {
     // given
     when(dao.acquireProcessLock()).thenReturn(true);
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();

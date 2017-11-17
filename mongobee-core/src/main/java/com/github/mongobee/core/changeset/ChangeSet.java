@@ -20,32 +20,33 @@ public @interface ChangeSet {
    * Obligatory
    * @return author
    */
-  public String author();  // must be set
+  String author ();  // must be set
 
   /**
    * Unique ID of the changeset.
    * Obligatory
    * @return unique id
    */
-  public String id();      // must be set
+  String id ();      // must be set
 
   /**
    * Sequence that provide correct order for changesets. Sorted alphabetically, ascending.
    * Obligatory.
    * @return ordering
    */
-  public String order();   // must be set
+  String order ();   // must be set
 
   /**
    * Executes the change set on every mongobee's execution, even if it has been run before.
    * Optional (default is false)
    * @return should run always?
    */
-  public boolean runAlways() default false;
-//
-//  /**
-//   * Executes the change the first time it is seen and each time the change set has been changed. <br/>
-//   * Optional (default is false)
-//   */
-//  public boolean runOnChange() default false;
+  boolean runAlways () default false;
+
+  /**
+   * Defines if the change set contains rollback actions.
+   * Optional
+   * @return contains rollback action?
+   */
+  String rollbackScriptName () default "";
 }

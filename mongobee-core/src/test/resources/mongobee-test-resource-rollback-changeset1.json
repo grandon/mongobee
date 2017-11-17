@@ -1,0 +1,11 @@
+{
+  delete: "contact",
+  deletes: [
+    {
+      q: {
+        name: "foo"
+      },
+      limit: 1
+    }
+  ]
+}

@@ -69,7 +69,6 @@ public class SpringMongobeeTest {
     MongoTemplate mt = mock(MongoTemplate.class);
     when(mt.getCollectionNames()).thenReturn(Collections.EMPTY_SET);
     when(dao.acquireProcessLock()).thenReturn(true);
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
     runner.setMongoTemplate(mt);
     runner.afterPropertiesSet();
     verify(mt).getCollectionNames();

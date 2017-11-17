@@ -51,16 +51,53 @@ public class ChangeService {
     }
   }
 
-  public ChangeEntry createChangeEntry(Method changesetMethod){
-    if (changesetMethod.isAnnotationPresent(ChangeSet.class)){
-      ChangeSet annotation = changesetMethod.getAnnotation(ChangeSet.class);
-  
+  public List<ChangeEntry> createChangeEntries(List<Method> changeSetMethods) throws MongobeeChangeSetException {
+    List<ChangeEntry> changeEntries = null;
+
+    if (changeSetMethods != null) {
+      changeEntries = new ArrayList<>();
+
+      for (Method changeSetMethod : changeSetMethods) {
+        changeEntries.add(createChangeEntry(changeSetMethod));
+      }
+    }
+
+    return changeEntries;
+  }
+
+  public ChangeEntry createChangeEntry(Method changeSetMethod) throws MongobeeChangeSetException {
+    if (changeSetMethod.isAnnotationPresent(ChangeSet.class)){
+      ChangeSet annotation = changeSetMethod.getAnnotation(ChangeSet.class);
+
+      List<String> rollbackCommands = null;
+      Scanner rollbackScriptScanner = null;
+
+      try {
+        if (!annotation.rollbackScriptName().isEmpty()) {
+          rollbackScriptScanner = new Scanner(this.getClass().getClassLoader().getResourceAsStream(annotation.rollbackScriptName()), "UTF-8").useDelimiter("\\A");
+
+          if (rollbackScriptScanner.hasNext()) {
+            String rollbackScript = rollbackScriptScanner.next();
+            rollbackCommands = Arrays.asList(rollbackScript.split("\n\n"));
+          } else {
+            throw new MongobeeChangeSetException(String.format("Problem processing rollback script [%s]. Verify that the script is in the classpath and contains valid content.", annotation.rollbackScriptName()));
+          }
+        }
+      } catch (Exception e) {
+        throw new MongobeeChangeSetException(String.format("Problem processing rollback script [%s]. Verify that the script is in the classpath and contains valid content. Message = [%s]", annotation.rollbackScriptName(), e.getMessage()), e);
+      } finally {
+        if (rollbackScriptScanner != null) {
+          rollbackScriptScanner.close();
+        }
+      }
+
       return new ChangeEntry(
           annotation.id(),
           annotation.author(),
           new Date(),
-          changesetMethod.getDeclaringClass().getName(),
-          changesetMethod.getName());
+          changeSetMethod.getDeclaringClass().getName(),
+          changeSetMethod.getName(),
+          rollbackCommands);
     } else {
       return null;
     }
@@ -68,18 +105,18 @@ public class ChangeService {
 
   protected List<Method> filterChangeSetAnnotation(List<Method> allMethods) throws MongobeeChangeSetException {
     final Set<String> changeSetIds = new HashSet<>();
-    final List<Method> changesetMethods = new ArrayList<>();
+    final List<Method> changeSetMethods = new ArrayList<>();
     for (final Method method : allMethods) {
       if (method.isAnnotationPresent(ChangeSet.class)) {
-        String id = method.getAnnotation(ChangeSet.class).id();
-        if (changeSetIds.contains(id)) {
-          throw new MongobeeChangeSetException(String.format("Duplicated changeset id found: '%s'", id));
+        ChangeSet currentChangeSet = method.getAnnotation(ChangeSet.class);
+          if (changeSetIds.contains(currentChangeSet.id())) {
+            throw new MongobeeChangeSetException(String.format("Duplicated changeset id found: [%s]", currentChangeSet.id()));
+          }
+          changeSetIds.add(currentChangeSet.id());
+          changeSetMethods.add(method);
         }
-        changeSetIds.add(id);
-        changesetMethods.add(method);
       }
-    }
-    return changesetMethods;
+    return changeSetMethods;
   }
 
 }

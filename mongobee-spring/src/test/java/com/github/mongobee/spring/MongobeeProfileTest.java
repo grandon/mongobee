@@ -76,7 +76,6 @@ public class MongobeeProfileTest {
     // given
     runner.setSpringEnvironment(new EnvironmentMock("dev", "test"));
     runner.setChangeLogsScanPackage(ProfiledDevChangeLog.class.getPackage().getName());
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();
@@ -106,7 +105,6 @@ public class MongobeeProfileTest {
     // given
     runner.setSpringEnvironment(new EnvironmentMock("test"));
     runner.setChangeLogsScanPackage(UnProfiledChangeLog.class.getPackage().getName());
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();
@@ -148,7 +146,6 @@ public class MongobeeProfileTest {
     // given
     runner.setSpringEnvironment(new EnvironmentMock("foobar"));
     runner.setChangeLogsScanPackage(ProfiledDevChangeLog.class.getPackage().getName());
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();
@@ -163,7 +160,6 @@ public class MongobeeProfileTest {
     // given
     runner.setSpringEnvironment(null);
     runner.setChangeLogsScanPackage(AnotherMongobeeTestResource.class.getPackage().getName());
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();
@@ -178,7 +174,6 @@ public class MongobeeProfileTest {
     // given
     runner.setSpringEnvironment(new EnvironmentMock());
     runner.setChangeLogsScanPackage(AnotherMongobeeTestResource.class.getPackage().getName());
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();
@@ -193,7 +188,6 @@ public class MongobeeProfileTest {
     // given
     runner.setSpringEnvironment(new EnvironmentMock("dev"));
     runner.setChangeLogsScanPackage(AnotherMongobeeTestResource.class.getPackage().getName());
-    when(dao.isNewChange(any(ChangeEntry.class))).thenReturn(true);
 
     // when
     runner.execute();

@@ -8,4 +8,8 @@ public class MongobeeChangeSetException extends MongobeeException {
   public MongobeeChangeSetException(String message) {
     super(message);
   }
+
+  public MongobeeChangeSetException(String message, Exception baseException) {
+    super(message, baseException);
+  }
 }
