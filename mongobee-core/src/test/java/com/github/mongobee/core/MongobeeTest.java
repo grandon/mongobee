@@ -371,12 +371,9 @@ public class MongobeeTest {
     when(dao.acquireProcessLock()).thenReturn(false);
 
     // when
-    try
-    {
+    try {
       runner.execute();
-    }
-    catch (MongobeeLockAquireException e)
-    {
+    } catch (MongobeeLockAquireException e) {
       assertTrue(e.getMessage().contains("timeout"));
       throw e;
     }

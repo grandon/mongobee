@@ -276,17 +276,13 @@ public class Mongobee {
     }
   }
 
-  private boolean changeEntryListContainsChangeId(List<ChangeEntry> changeEntries, String changeId)
-  {
-    if (changeEntries == null || changeEntries.size() == 0)
-    {
+  private boolean changeEntryListContainsChangeId(List<ChangeEntry> changeEntries, String changeId) {
+    if (changeEntries == null || changeEntries.size() == 0) {
       return false;
     }
 
-    for (ChangeEntry changeEntry : changeEntries)
-    {
-      if (changeEntry.getChangeId().equals(changeId))
-      {
+    for (ChangeEntry changeEntry : changeEntries) {
+      if (changeEntry.getChangeId().equals(changeId)) {
         return true;
       }
     }
